@@ -740,12 +740,30 @@ class ComponentBase extends ComponentSurface implements IClonable<ComponentBase>
      @:dox(group = "Size related properties and methods")
      public function resizeComponent(w:Null<Float>, h:Null<Float>) {
          var invalidate:Bool = false;
- 
+
+         // Enforce min/max constraints during resize
+         if (w != null && style != null) {
+             if (style.minWidth != null && w < style.minWidth) {
+                 w = style.minWidth;
+             }
+             if (style.maxWidth != null && w > style.maxWidth) {
+                 w = style.maxWidth;
+             }
+         }
+         if (h != null && style != null) {
+             if (style.minHeight != null && h < style.minHeight) {
+                 h = style.minHeight;
+             }
+             if (style.maxHeight != null && h > style.maxHeight) {
+                 h = style.maxHeight;
+             }
+         }
+
          if (w != null && _componentWidth != w) {
              _componentWidth = w;
              invalidate = true;
          }
- 
+
          if (h != null && _componentHeight != h) {
              _componentHeight = h;
              invalidate = true;
