@@ -73,6 +73,11 @@ class ToolTipManager {
         target.unregisterEvent(MouseEvent.MOUSE_OUT, onTargetMouseOut);
         target.unregisterEvent(MouseEvent.MOUSE_MOVE, onTargetMouseMove);
         _toolTipOptions.remove(target);
+        // A target removed while hovered must not leave its delay timer running.
+        if (target == _currentComponent) {
+            stopCurrent();
+            hideCurrentToolTip();
+        }
     }
 
     public function getTooltipOptions(target:Component):ToolTipOptions {
@@ -268,6 +273,10 @@ class ToolTipManager {
         _toolTip.hide();
 
         var options = _toolTipOptions.get(component);
+        if (options == null) {
+            stopCurrent();
+            return;
+        }
         var renderer = createToolTipRenderer(options);
         if (_toolTip.childComponents[0] != renderer) {
             if (_toolTip.childComponents.length > 0) {
