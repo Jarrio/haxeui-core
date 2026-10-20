@@ -665,9 +665,12 @@ class ButtonEvents extends haxe.ui.events.Events {
         if (hasEvent(MouseEvent.MOUSE_DOWN, onMouseDown) == false) {
             registerEvent(MouseEvent.MOUSE_DOWN, onMouseDown);
         }
+        #if !haxeui_simple
+        // haxeui-simple re-checks hover itself after every frame that changes what's under the pointer.
         if (hasEvent(UIEvent.MOVE, onMove) == false) {
             registerEvent(UIEvent.MOVE, onMove);
         }
+        #end
         if (hasEvent(ActionEvent.ACTION_START, onActionStart) == false) {
             registerEvent(ActionEvent.ACTION_START, onActionStart);
         }
