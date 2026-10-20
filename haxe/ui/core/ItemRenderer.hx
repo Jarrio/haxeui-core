@@ -141,21 +141,22 @@ class ItemRenderer extends Box {
             var components = findComponents(Component);
             for (c in components) {
                 if ((c is InteractiveComponent)) {
-                    if (c.hasEvent(MouseEvent.CLICK, onItemClick) == false) {
+                    if (!_registeredOn.exists(c)) {
+                        _registeredOn.set(c, true);
                         c.registerEvent(MouseEvent.CLICK, onItemClick);
-                    }
-                    if (c.hasEvent(UIEvent.CHANGE, onItemChange) == false) {
                         c.registerEvent(UIEvent.CHANGE, onItemChange);
                     }
                 } else if (c.style != null && c.style.pointerEvents != null) {
-                    if (c.hasEvent(MouseEvent.CLICK, onItemClick) == false) {
+                    if (!_registeredOn.exists(c)) {
+                        _registeredOn.set(c, true);
                         c.registerEvent(MouseEvent.CLICK, onItemClick);
                     }
                 }
             }
 
             if (this.style != null && this.style.pointerEvents != null) {
-                if (this.hasEvent(MouseEvent.CLICK, onItemClick) == false) {
+                if (!_registeredOn.exists(this)) {
+                    _registeredOn.set(this, true);
                     this.registerEvent(MouseEvent.CLICK, onItemClick);
                 }
             }
@@ -174,6 +175,11 @@ class ItemRenderer extends Box {
         _data = data;
     }
     
+    // The components this renderer has added onItemClick and onItemChange to. On hxcpp, hasEvent can report another
+    // renderer's handler as this one's: a table's CompoundItemRenderer and the ItemRenderer inside it both register
+    // on the same button, so the outer one, which knows the row, used to skip it and COMPONENT_EVENT never fired.
+    private var _registeredOn:haxe.ds.ObjectMap<Component, Bool> = new haxe.ds.ObjectMap();
+
     private function onItemChange(event:UIEvent) {
         if (itemIndex < 0) {
             return; 
