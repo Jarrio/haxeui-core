@@ -131,8 +131,24 @@ class ScreenBase implements IComponentContainer {
         }
     }
 
+    // vw, vh and media queries depend only on the screen's size, so a root that resizes for any other reason (its
+    // content grew, say) doesn't need its whole subtree restyled.
+    private var _styledWidth:Null<Float> = null;
+    private var _styledHeight:Null<Float> = null;
+
     private function _onRootComponentResize(e:UIEvent) {
-        _refreshStyleComponent(e.target);
+        if (_styledWidth == null) {
+            // A root's first resize is part of its first validation, which builds its styles at the current size.
+            _styledWidth = width;
+            _styledHeight = height;
+            return;
+        }
+        if (width == _styledWidth && height == _styledHeight) {
+            return;
+        }
+        _styledWidth = width;
+        _styledHeight = height;
+        refreshStyleRootComponents();
     }
 
     public function invalidateAll(flag:String = InvalidationFlags.ALL) {
