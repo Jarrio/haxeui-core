@@ -20,6 +20,10 @@ class ValidationManager {
 
     private var _queue:Array<IValidating> = [];
     private var _displayQueue:Array<Component> = [];
+    // What's in each queue, so adding doesn't search it: on hxcpp, indexOf on these arrays compares every element
+    // dynamically, which was the biggest single cost in a large screen's first layout.
+    private var _queued:haxe.ds.ObjectMap<IValidating, Bool> = new haxe.ds.ObjectMap();
+    private var _displayQueued:haxe.ds.ObjectMap<Component, Bool> = new haxe.ds.ObjectMap();
     private var _events:EventMap;
 
     private function new() {
@@ -50,12 +54,14 @@ class ValidationManager {
     public function dispose() {
         isValidating = false;
         _queue.splice(0, _queue.length);
+        _queued.clear();
     }
 
     public function add(object:IValidating) {
-        if (_queue.indexOf(object) != -1) {
+        if (_queued.exists(object)) {
             return;
         }
+        _queued.set(object, true);
 
         var queueLength:Int = _queue.length;
         if (isValidating == true) {
@@ -94,7 +100,8 @@ class ValidationManager {
     }
 
     public function addDisplay(item:Component, nextFrame:Bool = true) {
-        if (_displayQueue.indexOf(item) == -1) {
+        if (!_displayQueued.exists(item)) {
+            _displayQueued.set(item, true);
             _displayQueue.push(item);
         }
         if (nextFrame == false) {
@@ -135,6 +142,7 @@ class ValidationManager {
         //check length every time because add() might have added a new item during the last validation
         while (_queue.length > 0) {
             var item:IValidating = _queue.shift();
+            _queued.remove(item);
             if (item.depth < 0) {
                 continue;   //no longer on the display list
             }
@@ -151,6 +159,7 @@ class ValidationManager {
             item.updateComponentDisplay();
         }
         _displayQueue.splice(0, _displayQueue.length);
+        _displayQueued.clear();
 
         isValidating = false;
         
