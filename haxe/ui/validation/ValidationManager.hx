@@ -133,24 +133,18 @@ class ValidationManager {
         dispatch(new ValidationEvent(ValidationEvent.START));
 
         //check length every time because add() might have added a new item during the last validation
-        var __loopCount = 0;
         while (_queue.length > 0) {
             var item:IValidating = _queue.shift();
             if (item.depth < 0) {
                 continue;   //no longer on the display list
             }
-            __loopCount++;
-            if (__loopCount > 5000) {
-                var comp = cast(item, haxe.ui.core.Component);
-                trace('[VLOOP] iter=$__loopCount id=${comp.id} cls=${Type.getClassName(Type.getClass(comp))} invCount=${comp._invalidateCount} isAllInv=${comp._isAllInvalid} qLen=${_queue.length}');
-                if (__loopCount > 5020) {
-                    trace('[VLOOP] BREAKING');
-                    _queue.splice(0, _queue.length);
-                    break;
-                }
+            if (countValidation(item) > MAX_VALIDATIONS_PER_PASS) {
+                abandonValidation(item);
+                continue;
             }
             item.validateComponent();
         }
+        _passCounts.clear();
 
         for (i in 0..._displayQueue.length) {
             var item = _displayQueue[i];
@@ -188,6 +182,36 @@ class ValidationManager {
         
         dispatch(new ValidationEvent(ValidationEvent.STOP));
         
+    }
+
+    // A normal pass validates a component fewer than 20 times (a 200-item list peaks at 11), so more than this
+    // means components keep invalidating each other and the pass would never end.
+    private static inline var MAX_VALIDATIONS_PER_PASS:Int = 100;
+    private var _passCounts:haxe.ds.ObjectMap<IValidating, Int> = new haxe.ds.ObjectMap();
+    private var _reportedLoops:Map<String, Bool> = new Map();
+
+    private function countValidation(item:IValidating):Int {
+        var count = _passCounts.get(item);
+        count = (count == null) ? 1 : count + 1;
+        _passCounts.set(item, count);
+        return count;
+    }
+
+    // Drops only the looping component's pending work, so the rest of the pass still finishes. Clearing its flags
+    // lets its next invalidation queue it again; a component left marked invalid would never be validated again.
+    private function abandonValidation(item:IValidating) {
+        if (!(item is Component)) {
+            return;
+        }
+        var component:Component = cast item;
+        var name = Type.getClassName(Type.getClass(component)) + "#" + component.id;
+        if (!_reportedLoops.exists(name)) {
+            _reportedLoops.set(name, true);
+            trace('Validation loop: $name was validated more than $MAX_VALIDATIONS_PER_PASS times in one pass, so its layout was left as it was. Something keeps invalidating it, often the layout or resize handler of another component.');
+        }
+        component._invalidationFlags.clear();
+        component._delayedInvalidationFlags.clear();
+        component._isAllInvalid = false;
     }
 
     private inline function queueSortFunction(first:IValidating, second:IValidating):Int {
