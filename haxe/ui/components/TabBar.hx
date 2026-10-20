@@ -73,7 +73,10 @@ class TabBarLayout extends DefaultLayout {
 
         var max:Float = 0;
         for (button in container.childComponents) {
-            button.validateNow();
+            // Re-runs the button's layout for its natural height; validateNow also restyled it and its children
+            // on every pass, which was most of a window resize.
+            button.invalidateComponentLayout();
+            button.syncComponentValidation(false);
             if (button.componentHeight > max) {
                 max = button.componentHeight;
             }
