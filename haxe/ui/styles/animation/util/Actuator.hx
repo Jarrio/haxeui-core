@@ -72,6 +72,8 @@ class Actuator<T> {
     public function stop() {
         _stopped = true;
         target = null;
+        // As _finish does: a stopped tween left registered keeps the shared frame tick re-queuing forever.
+        unregisterFrameCallback(_nextFrame);
     }
 
     /**
@@ -253,6 +255,8 @@ class Actuator<T> {
 
     private function _nextFrame(stamp:Float) {
         if (_stopped == true) {
+            // Also covers a tween stopped during its delay, whose callback registers after stop() ran.
+            unregisterFrameCallback(_nextFrame);
             return;
         }
 
