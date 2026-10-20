@@ -86,8 +86,22 @@ class ValueTools {
         var counter = 0;
         var i = 0;
         var startParameter = 0;
+        var quote:String = null;
         while (i < s.length) {
             var char = s.charAt(i);
+            // Commas and brackets inside a quoted argument, as in path("M 0,0 C ..."), belong to it.
+            if (quote != null) {
+                if (char == quote) {
+                    quote = null;
+                }
+                i++;
+                continue;
+            }
+            if (char == "\"" || char == "'") {
+                quote = char;
+                i++;
+                continue;
+            }
             if (char == "," && counter == 0) {
                 params.push(s.substring(startParameter, i));
                 startParameter = i + 1;
@@ -111,8 +125,19 @@ class ValueTools {
         var i = 0;
         var startCall = 0;
         var startParams = -1;
+        var quote:String = null;
         while (i < s.length) {
             var char = s.charAt(i);
+            if (quote != null) {
+                if (char == quote) {
+                    quote = null;
+                }
+                i++;
+                continue;
+            }
+            if (char == "\"" || char == "'") {
+                quote = char;
+            }
             if (char == "(") {
                 if (startParams  == -1 ) startParams = i;
                 counter--;
@@ -142,6 +167,15 @@ class ValueTools {
                 startParams = -1;
             }
             i++;
+        }
+        // Words after the last call ("rgb(1, 2, 3) 1px solid") used to be dropped.
+        if (startParams == -1 && startCall < s.length) {
+            for (word in s.substring(startCall).split(" ")) {
+                word = StringTools.trim(word);
+                if (word != "") {
+                    calls.push(word);
+                }
+            }
         }
         return calls;
     }
