@@ -8,6 +8,8 @@ class RuleElement {
     public var selector:Selector;
     public var directives:Map<String, Directive> = new Map<String, Directive>();
     public var directiveCount:Int = 0;
+    // Whether any directive uses vw or vh, so the rule's effect changes with the screen's size.
+    public var usesViewportUnits(default, null):Bool = false;
 
     public function new(selector:String, directives:Array<Directive>) {
         this.selector = new Selector(selector);
@@ -86,6 +88,9 @@ class RuleElement {
     }
 
     private function processDirective(d:Directive) {
+        if (!usesViewportUnits && hasViewportUnits(d.value)) {
+            usesViewportUnits = true;
+        }
         switch (d.directive) {
             case "padding":
                 var vl = ValueTools.composite(d.value);
@@ -210,6 +215,25 @@ class RuleElement {
                 }
             case _:
                 trace("unknown value type", d.value);
+        }
+    }
+
+    private static function hasViewportUnits(value:Value):Bool {
+        if (value == null) {
+            return false;
+        }
+        switch (value) {
+            case Value.VDimension(Dimension.VW(_)) | Value.VDimension(Dimension.VH(_)):
+                return true;
+            case Value.VComposite(vl) | Value.VCall(_, vl):
+                for (v in vl) {
+                    if (hasViewportUnits(v)) {
+                        return true;
+                    }
+                }
+                return false;
+            case _:
+                return false;
         }
     }
 }

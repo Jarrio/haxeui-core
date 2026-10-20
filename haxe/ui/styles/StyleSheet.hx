@@ -52,7 +52,35 @@ class StyleSheet {
     private function get_hasMediaQueries():Bool {
         return _mediaQueries.length > 0;
     }
-    
+
+    /**
+        The rules whose effect can change with the screen's size: those using vw or vh, and every rule in an
+        @media block, whether or not its condition holds now.
+    **/
+    public function sizeDependentRules(out:Array<RuleElement> = null):Array<RuleElement> {
+        if (out == null) {
+            out = [];
+        }
+        for (r in _rules) {
+            if (r.usesViewportUnits) {
+                out.push(r);
+            }
+        }
+        for (mq in _mediaQueries) {
+            mq.styleSheet.allRules(out);
+        }
+        return out;
+    }
+
+    private function allRules(out:Array<RuleElement>) {
+        for (r in _rules) {
+            out.push(r);
+        }
+        for (mq in _mediaQueries) {
+            mq.styleSheet.allRules(out);
+        }
+    }
+
     public function findRule(selector:String, useCache = false):RuleElement {
         for (r in rules) {
             if (r.selector.toString() == selector) {

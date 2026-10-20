@@ -4,6 +4,8 @@ import haxe.ui.Toolkit;
 import haxe.ui.core.Component;
 import haxe.ui.core.IComponentContainer;
 import haxe.ui.events.UIEvent;
+import haxe.ui.styles.StyleSheet;
+import haxe.ui.styles.elements.RuleElement;
 import haxe.ui.validation.InvalidationFlags;
 
 class ScreenBase implements IComponentContainer {
@@ -148,7 +150,42 @@ class ScreenBase implements IComponentContainer {
         }
         _styledWidth = width;
         _styledHeight = height;
-        refreshStyleRootComponents();
+        refreshSizeDependentStyles();
+    }
+
+    // Restyles only the components that a vw, vh or @media rule matches, instead of every component: restyling
+    // everything on each size change of a window being dragged took most of the frame. A rule is tested by its
+    // selector alone, since a media condition may have just started or stopped holding.
+    private function refreshSizeDependentStyles() {
+        var rules = Toolkit.styleSheet.sizeDependentRules();
+        for (component in rootComponents) {
+            _refreshSizeDependentStyles(component, rules, null, null);
+        }
+    }
+
+    @:access(haxe.ui.core.Component)
+    private function _refreshSizeDependentStyles(component:Component, rules:Array<RuleElement>, localStyleSheet:StyleSheet, localRules:Array<RuleElement>) {
+        // A component's own style sheet applies to it and its children, as in Component.styleSheet.
+        if (component._styleSheet != null && component._styleSheet != localStyleSheet) {
+            localStyleSheet = component._styleSheet;
+            localRules = localStyleSheet.sizeDependentRules();
+        }
+        if (_matchesAny(component, rules) || (localRules != null && _matchesAny(component, localRules))) {
+            component.invalidateComponentStyle();
+            component.invalidateComponentDisplay();
+        }
+        for (child in component.childComponents) {
+            _refreshSizeDependentStyles(child, rules, localStyleSheet, localRules);
+        }
+    }
+
+    private static function _matchesAny(component:Component, rules:Array<RuleElement>):Bool {
+        for (r in rules) {
+            if (r.match(component)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public function invalidateAll(flag:String = InvalidationFlags.ALL) {

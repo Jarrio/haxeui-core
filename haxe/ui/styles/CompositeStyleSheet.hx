@@ -123,6 +123,15 @@ class CompositeStyleSheet {
         return m;
     }
     
+    /** See `StyleSheet.sizeDependentRules`. **/
+    public function sizeDependentRules():Array<RuleElement> {
+        var r = [];
+        for (s in _styleSheets) {
+            s.sizeDependentRules(r);
+        }
+        return r;
+    }
+
     public function getAllRules():Array<RuleElement> {
         var r = [];
         for (s in _styleSheets) {
