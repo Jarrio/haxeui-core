@@ -725,21 +725,25 @@ class Component extends ComponentImpl
      * @param callback a callback that receives one component, and returns whether the walking should continue or not.
      */
     public function walkComponents(callback:Component->Bool) {
+        walkComponentsFrom(callback);
+    }
+
+    // Returns false once the callback has, which ends the whole walk. Plain recursion: wrapping the callback
+    // for each child allocated a closure and a captured flag per component, on every scroll step of a list.
+    private function walkComponentsFrom(callback:Component->Bool):Bool {
         if (callback(this) == false) {
-            return;
+            return false;
         }
 
-        for (child in childComponents) {
-            var cont = true;
-            child.walkComponents(function(c) {
-                cont = callback(c);
-                return cont;
-            });
-
-            if (cont == false) {
-                break;
+        // _children, not childComponents, which makes an empty array for every leaf.
+        if (_children != null) {
+            for (child in _children) {
+                if (child.walkComponentsFrom(callback) == false) {
+                    return false;
+                }
             }
         }
+        return true;
     }
 
     /**

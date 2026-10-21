@@ -474,6 +474,9 @@ class ComponentBase extends ComponentSurface implements IClonable<ComponentBase>
     
     @:noCompletion 
     private function checkWatchForMoveEvents() {
+        // haxeui-simple re-checks hover itself after every frame that changes what's under the pointer. Watching
+        // here sent every hoverable component a MOVE event, and a hit test, on every scroll step.
+        #if !haxeui_simple
         if (hasEvent(MouseEvent.MOUSE_OVER) || hasEvent(MouseEvent.MOUSE_OUT)) {
             if (!_watchingMoveEvents) {
                 _watchingMoveEvents = true;
@@ -483,6 +486,7 @@ class ComponentBase extends ComponentSurface implements IClonable<ComponentBase>
             _watchingMoveEvents = false;
             unregisterEvent(UIEvent.MOVE, _onMoveInternal);
         }
+        #end
     }
 
     @:noCompletion
