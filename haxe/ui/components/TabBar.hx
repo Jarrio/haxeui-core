@@ -1,5 +1,6 @@
 package haxe.ui.components;
 
+import haxe.ui.actions.ActionType;
 import haxe.ui.behaviours.Behaviour;
 import haxe.ui.behaviours.DataBehaviour;
 import haxe.ui.components.Button.ButtonEvents;
@@ -9,6 +10,7 @@ import haxe.ui.containers.HBox;
 import haxe.ui.core.Component;
 import haxe.ui.core.CompositeBuilder;
 import haxe.ui.core.ICompositeInteractiveComponent;
+import haxe.ui.events.ActionEvent;
 import haxe.ui.events.Events;
 import haxe.ui.events.MouseEvent;
 import haxe.ui.events.UIEvent;
@@ -369,6 +371,8 @@ private class Events extends haxe.ui.events.Events {
         var builder:Builder = cast(_tabbar._compositeBuilder, Builder);
         for (t in builder._container.childComponents) {
             registerEventOn(t, MouseEvent.MOUSE_DOWN, onTabMouseDown);
+            registerEventOn(t, ActionEvent.ACTION_START, onTabActionStart);
+            registerEventOn(t, ActionEvent.ACTION_END, onTabActionEnd);
         }
         registerEvent(MouseEvent.MOUSE_WHEEL, onMouseWheel);
     }
@@ -389,6 +393,31 @@ private class Events extends haxe.ui.events.Events {
         }
 
         event.cancel();
+    }
+
+    // Space or Enter on a focused tab selects it, when released, as a button clicks then; not when the key went
+    // down on another tab and focus moved here while it was held.
+    private var _pressedTab:Component = null;
+
+    private function onTabActionStart(event:ActionEvent) {
+        switch (event.action) {
+            case ActionType.PRESS | ActionType.CONFIRM:
+                _pressedTab = event.target;
+            case _:
+        }
+    }
+
+    private function onTabActionEnd(event:ActionEvent) {
+        switch (event.action) {
+            case ActionType.PRESS | ActionType.CONFIRM:
+                var pressed = _pressedTab;
+                _pressedTab = null;
+                if (pressed == event.target) {
+                    var builder:Builder = cast(_tabbar._compositeBuilder, Builder);
+                    _tabbar.selectedIndex = builder._container.getComponentIndex(event.target);
+                }
+            case _:
+        }
     }
 
     private function onTabMouseDown(event:MouseEvent) {
