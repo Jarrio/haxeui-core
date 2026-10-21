@@ -96,6 +96,16 @@ class ActionManager {
             _repeatActions.set(action, {
                 type: action,
                 timer: new Timer(c.actionRepeatInterval, function() { // TODO: 100ms should probably be configurable
+                    // Repeat on the component the key went down on. Once focus has moved, the repeat ends there
+                    // (its key-up would reach the new focus instead) rather than pressing whatever has focus now.
+                    if (FocusManager.instance.focus != cast c) {
+                        if (_repeatActions.exists(action)) {
+                            _repeatActions.get(action).timer.stop();
+                            _repeatActions.remove(action);
+                        }
+                        c.dispatch(new ActionEvent(ActionEvent.ACTION_END, action));
+                        return;
+                    }
                     actionStart(action, source);
                 })
             });
