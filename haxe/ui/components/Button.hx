@@ -13,6 +13,7 @@ import haxe.ui.core.InteractiveComponent;
 import haxe.ui.core.ItemRenderer;
 import haxe.ui.core.Screen;
 import haxe.ui.events.ActionEvent;
+import haxe.ui.events.FocusEvent;
 import haxe.ui.events.MouseEvent;
 import haxe.ui.events.UIEvent;
 import haxe.ui.geom.Size;
@@ -644,6 +645,8 @@ private class SelectedBehaviour extends DataBehaviour {
 class ButtonEvents extends haxe.ui.events.Events {
     private var _button:Button;
     private var _down:Bool = false;
+    // Pressed with Space or Enter: the press ends with the key, or is dropped if focus moves first.
+    private var _actionDown:Bool = false;
     private var _repeatTimer:Timer;
     private var _repeater:Bool = false;
     private var _repeatInterval:Int = 0;
@@ -677,6 +680,9 @@ class ButtonEvents extends haxe.ui.events.Events {
         if (hasEvent(ActionEvent.ACTION_END, onActionEnd) == false) {
             registerEvent(ActionEvent.ACTION_END, onActionEnd);
         }
+        if (hasEvent(FocusEvent.FOCUS_OUT, onFocusOut) == false) {
+            registerEvent(FocusEvent.FOCUS_OUT, onFocusOut);
+        }
 
         if (_button.toggle == true) {
             // we want to add the event as high so it gets called first before any user handlers
@@ -694,6 +700,7 @@ class ButtonEvents extends haxe.ui.events.Events {
         unregisterEvent(UIEvent.MOVE, onMove);
         unregisterEvent(ActionEvent.ACTION_START, onActionStart);
         unregisterEvent(ActionEvent.ACTION_END, onActionEnd);
+        unregisterEvent(FocusEvent.FOCUS_OUT, onFocusOut);
     }
 
     private function onMouseOver(event:MouseEvent) {
@@ -834,6 +841,7 @@ class ButtonEvents extends haxe.ui.events.Events {
                     event.repeater = true;
                 }
                 press();
+                _actionDown = true;
                 if (_button.repeater == true) {
                     _button.dispatch(new MouseEvent(MouseEvent.CLICK));
                     if ( _repeatInterval > _button.repeatInterval) {
@@ -847,9 +855,25 @@ class ButtonEvents extends haxe.ui.events.Events {
     private function onActionEnd(event:ActionEvent) {
         switch (event.action) {
             case ActionType.PRESS | ActionType.CONFIRM:
+                if (!_actionDown) {
+                    return; // pressed elsewhere: focus arrived while the key was held
+                }
+                _actionDown = false;
                 release();
                 _repeatInterval = 0;
             case _:    
+        }
+    }
+
+    // As in a browser: Tab away from a button held with Space or Enter and it isn't clicked.
+    private function onFocusOut(event:FocusEvent) {
+        if (!_actionDown) {
+            return;
+        }
+        _actionDown = false;
+        _down = false;
+        if (!(_button.toggle && _button.selected)) {
+            _button.removeClass(":down", true, recursiveStyling);
         }
     }
 }
