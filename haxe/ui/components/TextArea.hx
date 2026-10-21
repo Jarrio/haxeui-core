@@ -178,8 +178,8 @@ private class TextAreaLayout extends DefaultLayout {
         }
 
         if (component.hasTextInput() == true) {
-            component.getTextInput().left = xpos + (borderSize * 2);
-            component.getTextInput().top = paddingTop + (borderSize * 2);
+            component.getTextInput().left = xpos + borderSize;
+            component.getTextInput().top = paddingTop + borderSize;
         }
     }
 
@@ -214,8 +214,9 @@ private class TextAreaLayout extends DefaultLayout {
 
         if (component.hasTextInput() == true) {
             var size:Size = usableSize;
-            component.getTextInput().width = size.width - 0 - ((borderSize - 1) * 2) - offset;
-            component.getTextInput().height = size.height - 0 - ((borderSize - 1) * 2);
+            // Inside the border on both sides, so the right and bottom padding match the left and top.
+            component.getTextInput().width = size.width - (borderSize * 2) - offset;
+            component.getTextInput().height = size.height - (borderSize * 2);
         }
     }
 
