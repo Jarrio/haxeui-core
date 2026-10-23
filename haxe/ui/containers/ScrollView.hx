@@ -956,6 +956,10 @@ class ScrollViewEvents extends haxe.ui.events.Events {
             if (c.hasTextInput() || (c is Scroll)) {
                 return;
             }
+            // a mouse drag over selectable text selects it; a touch still scrolls
+            if (!event.touchEvent && c.hasTextDisplay() && c.getTextDisplay().selectable) {
+                return;
+            }
         }
 
         //event.cancel();
