@@ -953,7 +953,12 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         // if we are under a scrollbar, lets let the scroll bar handle it (rather than scrollview intefering) 
         var under = _scrollview.findComponentsUnderPoint(event.screenX - componentOffset.x, event.screenY - componentOffset.y);
         for (c in under) {
-            if (c.hasTextInput() || (c is Scroll)) {
+            // a press on a text input is its own, to select in it; with touch a single line lets the page scroll,
+            // as on a phone, and selects with a long press instead
+            if (c.hasTextInput() && (!event.touchEvent || c.getTextInput().multiline)) {
+                return;
+            }
+            if (c is Scroll) {
                 return;
             }
             // a mouse drag over selectable text selects it; a touch still scrolls

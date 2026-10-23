@@ -442,6 +442,7 @@ private class Events extends haxe.ui.events.Events {
         }
 
         registerEvent(MouseEvent.MOUSE_DOWN, onMouseDown);
+        registerEvent(MouseEvent.CLICK, onClick);
         registerEvent(FocusEvent.FOCUS_IN, onFocusChange);
         registerEvent(FocusEvent.FOCUS_OUT, onFocusChange);
         registerEvent(KeyboardEvent.KEY_UP, onKeyUp);
@@ -450,6 +451,7 @@ private class Events extends haxe.ui.events.Events {
     public override function unregister() {
         _textfield.getTextInput().data.onChangedCallback = null;
         unregisterEvent(MouseEvent.MOUSE_DOWN, onMouseDown);
+        unregisterEvent(MouseEvent.CLICK, onClick);
         unregisterEvent(FocusEvent.FOCUS_IN, onFocusChange);
         unregisterEvent(FocusEvent.FOCUS_OUT, onFocusChange);
         unregisterEvent(KeyboardEvent.KEY_UP, onKeyUp);
@@ -457,7 +459,18 @@ private class Events extends haxe.ui.events.Events {
 
     private function onMouseDown(event:MouseEvent) { // TODO: this should happen automatically as part of InteractiveComponent (?)
         //event.cancel();
+        // a touch focuses on a tap (onClick), as phones do, so a swipe that starts on the field scrolls without
+        // bringing the keyboard up
+        if (event.touchEvent) {
+            return;
+        }
         _textfield.focus = true;
+    }
+
+    private function onClick(event:MouseEvent) {
+        if (event.touchEvent) {
+            _textfield.focus = true;
+        }
     }
 
     private function onFocusChange(event:FocusEvent) {
