@@ -359,6 +359,9 @@ class TextInput extends TextInputImpl implements IValidating {
         _isValidating = false;
     }
 
+    /** The text when the change callback last ran from validating the data. **/
+    private var _notifiedText:String = null;
+
     private function validateComponentInternal() {
         var dataInvalid = isComponentInvalid(InvalidationFlags.DATA);
         var styleInvalid = isComponentInvalid(InvalidationFlags.STYLE);
@@ -386,7 +389,9 @@ class TextInput extends TextInputImpl implements IValidating {
             measureText();
         }
         
-        if (dataInvalid) {
+        // Setting the scroll position invalidates the data too, so the callback runs only when the text changed.
+        if (dataInvalid && _text != _notifiedText) {
+            _notifiedText = _text;
             if (_inputData.onChangedCallback != null) {
                 _inputData.onChangedCallback();
             }
