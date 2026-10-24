@@ -74,6 +74,12 @@ class ScrollView extends InteractiveComponent implements IScroller {
     **/
     public static var flingMotion:Float->FlingMotion = exponentialFling;
 
+    /**
+        What a touch drag or a fling past either end of a scroll view shows, which differs between platforms, so a
+        theme can set it (Android's stretch, iOS's bounce). Null, the default, keeps the view at its ends.
+    **/
+    public static var overscroll:OverscrollEffect = null;
+
     static function exponentialFling(velocity:Float):FlingMotion {
         var tau = 0.325;
         var distance = velocity * tau;
@@ -81,6 +87,7 @@ class ScrollView extends InteractiveComponent implements IScroller {
         var duration = Math.abs(distance) > 0.5 ? tau * Math.log(Math.abs(distance) / 0.5) : 0;
         return {
             position: t -> t >= duration ? distance : distance * (1 - Math.exp(-t / tau)),
+            velocity: t -> t >= duration ? 0 : velocity * Math.exp(-t / tau),
             duration: duration
         };
     }
@@ -772,7 +779,25 @@ private class EmptyContentsText extends DefaultBehaviour {
 /** A fling along one axis: the offset from where the drag let go, `t` seconds later, and when it stops. **/
 typedef FlingMotion = {
     var position:Float->Float;
+    /** Its velocity `t` seconds after it let go, in units a second: what it hands an overscroll effect at an end. **/
+    @:optional var velocity:Float->Float;
     var duration:Float;
+}
+
+/**
+    An overscroll effect (see `ScrollView.overscroll`). Distances are in units past the start (below 0) or the end
+    (above 0) of the scrolled range along one axis; the effect shows them, and returns to rest by itself.
+**/
+interface OverscrollEffect {
+    /** A drag holds the view `distance` past an end; 0 once it's back in range. **/
+    function pull(scrollview:ScrollView, vertical:Bool, distance:Float):Void;
+    /**
+        The drag let go while past an end (`velocity` 0), or a fling reached an end at `velocity` units a second:
+        the effect returns to rest.
+    **/
+    function release(scrollview:ScrollView, vertical:Bool, velocity:Float):Void;
+    /** How far past an end it shows now, as a pull's distance, so a press there carries on from it; 0 at rest. **/
+    function distance(scrollview:ScrollView, vertical:Bool):Float;
 }
 
 @:dox(hide) @:noCompletion
@@ -1014,10 +1039,10 @@ class ScrollViewEvents extends haxe.ui.events.Events {
 
         _offset = new Point();
         if (hscroll != null) {
-            _offset.x = hscroll.pos + event.screenX;
+            _offset.x = hscroll.pos + caughtOverscroll(false, event) + event.screenX;
         }
         if (vscroll != null) {
-            _offset.y = vscroll.pos + event.screenY;
+            _offset.y = vscroll.pos + caughtOverscroll(true, event) + event.screenY;
         }
 
         _sampleTimes.resize(0);
@@ -1031,13 +1056,51 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         Screen.instance.registerEvent(MouseEvent.MOUSE_UP, onMouseUp);
     }
 
+    // How far past an end the drag holds the view, along each axis (see ScrollView.overscroll).
+    private var _overscrollX:Float = 0;
+    private var _overscrollY:Float = 0;
+
+    /** A touch press catches an overscroll effect that's returning to rest, and the drag carries on from it. **/
+    private function caughtOverscroll(vertical:Bool, event:MouseEvent):Float {
+        var effect = ScrollView.overscroll;
+        var distance = (effect != null && event.touchEvent) ? effect.distance(_scrollview, vertical) : 0;
+        if (distance != 0) {
+            effect.pull(_scrollview, vertical, distance);
+        }
+        if (vertical) {
+            _overscrollY = distance;
+        } else {
+            _overscrollX = distance;
+        }
+        return distance;
+    }
+
+    /** Sets `scroll` to the drag's `pos`, and shows how far past an end that is with the overscroll effect. **/
+    private function dragTo(scroll:Scroll, pos:Float, vertical:Bool, touch:Bool) {
+        scroll.pos = pos;
+        var effect = ScrollView.overscroll;
+        if (effect == null || !touch) {
+            return;
+        }
+        var over = pos < scroll.min ? pos - scroll.min : (pos > scroll.max ? pos - scroll.max : 0);
+        var was = vertical ? _overscrollY : _overscrollX;
+        if (over != was) {
+            effect.pull(_scrollview, vertical, over);
+            if (vertical) {
+                _overscrollY = over;
+            } else {
+                _overscrollX = over;
+            }
+        }
+    }
+
     private var _movementThreshold:Int = 3;
     private var _lastMousePos:Point = null;
     private function onMouseMove(event:MouseEvent) {
         event.cancel();
         var hscroll:HorizontalScroll = _scrollview.findComponent(HorizontalScroll, false);
         if (hscroll != null) {
-            hscroll.pos = _offset.x - event.screenX;
+            dragTo(hscroll, _offset.x - event.screenX, false, event.touchEvent);
             var distX = Math.abs(event.screenX - _lastMousePos.x);
             #if haxeui_kha
             if (distX > 0) {
@@ -1051,7 +1114,7 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         }
         var vscroll:VerticalScroll = _scrollview.findComponent(VerticalScroll, false);
         if (vscroll != null) {
-            vscroll.pos = _offset.y - event.screenY;
+            dragTo(vscroll, _offset.y - event.screenY, true, event.touchEvent);
             var distY = Math.abs(event.screenY - _lastMousePos.y);
             #if haxeui_kha
             if (distY > 0) {
@@ -1189,12 +1252,18 @@ class ScrollViewEvents extends haxe.ui.events.Events {
 
         // A touch drag flings, as on a phone; with the inertial mode any drag does.
         var mode = _scrollview.scrollMode;
-        if (mode == ScrollMode.INERTIAL || (mode == ScrollMode.DEFAULT && event.touchEvent)) {
+        if (mode != ScrollMode.INERTIAL && (mode != ScrollMode.DEFAULT || !event.touchEvent)) {
+            releaseOverscroll(false, 0);
+            releaseOverscroll(true, 0);
+        } else {
             var now = frameSeconds();
             _flingHScroll = _scrollview.findComponent(HorizontalScroll, false);
             _flingVScroll = _scrollview.findComponent(VerticalScroll, false);
             var vx = _flingHScroll != null ? releaseVelocity(_sampleX, now) : 0;
             var vy = _flingVScroll != null ? releaseVelocity(_sampleY, now) : 0;
+            // Let go past an end, the overscroll effect returns to rest; a flick back into range still flings.
+            vx = releaseOverscroll(false, vx);
+            vy = releaseOverscroll(true, vy);
             _flingX = Math.abs(vx) >= MIN_FLING_VELOCITY ? ScrollView.flingMotion(vx) : null;
             _flingY = Math.abs(vy) >= MIN_FLING_VELOCITY ? ScrollView.flingMotion(vy) : null;
             if (_flingX != null || _flingY != null) {
@@ -1217,6 +1286,24 @@ class ScrollViewEvents extends haxe.ui.events.Events {
     /** The frame's time, in seconds: drag samples and flings are timed by the frames that show them. **/
     private static inline function frameSeconds():Float {
         return Platform.instance.frameTime() / 1000;
+    }
+
+    /**
+        Lets go of a drag held past an end along one axis: the overscroll effect returns to rest, and `velocity` is
+        what's left to fling, 0 unless it heads back into range.
+    **/
+    private function releaseOverscroll(vertical:Bool, velocity:Float):Float {
+        var over = vertical ? _overscrollY : _overscrollX;
+        if (over == 0 || ScrollView.overscroll == null) {
+            return velocity;
+        }
+        if (vertical) {
+            _overscrollY = 0;
+        } else {
+            _overscrollX = 0;
+        }
+        ScrollView.overscroll.release(_scrollview, vertical, 0);
+        return (over > 0) == (velocity > 0) ? 0 : velocity;
     }
 
     /** Moves a fling on, once a frame, until it stops, reaches an end, or a press stops it. **/
@@ -1244,6 +1331,10 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         var pos = from + motion.position(t);
         var atEnd = pos <= scroll.min || pos >= scroll.max;
         scroll.pos = Math.max(scroll.min, Math.min(scroll.max, pos));
+        // A fling that reaches an end with speed to spare hands it to the overscroll effect.
+        if (atEnd && t < motion.duration && ScrollView.overscroll != null && motion.velocity != null) {
+            ScrollView.overscroll.release(_scrollview, scroll is VerticalScroll, motion.velocity(t));
+        }
         return t < motion.duration && !atEnd;
     }
 
