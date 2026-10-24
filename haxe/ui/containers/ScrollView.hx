@@ -1135,7 +1135,7 @@ class ScrollViewEvents extends haxe.ui.events.Events {
     @:access(haxe.ui.core.Component)
     private function onContainerEventsStatusChanged() {
         var scrollViewContents = _scrollview.findComponent("scrollview-contents", Component, true, "css");
-        scrollViewContents.disableInteractivity(_containerEventsPaused);
+        scrollViewContents.pauseInteractivity(_containerEventsPaused);
 
         if (_containerEventsPaused == true) {
             scrollViewContents.removeClass(":hover", true, true);
