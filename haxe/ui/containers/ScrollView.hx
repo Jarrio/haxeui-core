@@ -30,6 +30,7 @@ import haxe.ui.styles.Style;
 import haxe.ui.util.Timer;
 import haxe.ui.util.Variant;
 import haxe.ui.validation.InvalidationFlags;
+import haxe.ui.validation.ValidationManager;
 
 @:composite(ScrollViewEvents, ScrollViewBuilder, ScrollViewLayout)
 class ScrollView extends InteractiveComponent implements IScroller {
@@ -65,6 +66,24 @@ class ScrollView extends InteractiveComponent implements IScroller {
     @:clonable @:behaviour(EmptyContentsComponent)                  public var emptyContentsComponent:Component;
     @:clonable @:behaviour(EmptyContentsText)                       public var emptyContentsText:String;
     
+    /**
+        How a scroll view keeps moving after a drag lets go (a fling), which differs between platforms, so a theme can
+        set it: given the release velocity along one axis (units a second), the offset from where it let go `t`
+        seconds later, and when it stops. By default it slows exponentially, with a time constant of 325 ms.
+    **/
+    public static var flingMotion:Float->FlingMotion = exponentialFling;
+
+    static function exponentialFling(velocity:Float):FlingMotion {
+        var tau = 0.325;
+        var distance = velocity * tau;
+        // It stops with half a unit to go, too little to see.
+        var duration = Math.abs(distance) > 0.5 ? tau * Math.log(Math.abs(distance) / 0.5) : 0;
+        return {
+            position: t -> t >= duration ? distance : distance * (1 - Math.exp(-t / tau)),
+            duration: duration
+        };
+    }
+
     @:call(EnsureVisible)                                           public function ensureVisible(component:Component):Void;
     @:call(FindHorizontalScrollbar)                                 public function findHorizontalScrollbar():Component;
     @:call(FindVerticalScrollbar)                                   public function findVerticalScrollbar():Component;
@@ -744,13 +763,10 @@ private class EmptyContentsText extends DefaultBehaviour {
 //***********************************************************************************************************
 // Events
 //***********************************************************************************************************
-@:dox(hide) @:noCompletion
-typedef Inertia = {
-    var screen:Point;
-    var target:Point;
-    var amplitude:Point;
-    var direction:Point;
-    var timestamp:Float;
+/** A fling along one axis: the offset from where the drag let go, `t` seconds later, and when it stops. **/
+typedef FlingMotion = {
+    var position:Float->Float;
+    var duration:Float;
 }
 
 @:dox(hide) @:noCompletion
@@ -933,10 +949,31 @@ class ScrollViewEvents extends haxe.ui.events.Events {
     }
     
     private var _offset:Point;
-    private static inline var INERTIAL_TIME_CONSTANT:Int = 325;
-    private var _inertia:Inertia = null;
+
+    // The drag's last positions, to take its velocity from as it lets go: times in seconds, scroll positions.
+    private static inline var SAMPLES:Int = 20;
+    private var _sampleTimes:Array<Float> = [];
+    private var _sampleX:Array<Float> = [];
+    private var _sampleY:Array<Float> = [];
+
+    // A fling under way: when it started, from where, and its motion along each axis (null for none).
+    private var _flinging:Bool = false;
+    private var _flingStart:Float = 0;
+    private var _flingFromX:Float = 0;
+    private var _flingFromY:Float = 0;
+    private var _flingX:FlingMotion = null;
+    private var _flingY:FlingMotion = null;
+    private var _flingHScroll:Scroll = null;
+    private var _flingVScroll:Scroll = null;
+
+    // Android's ViewConfiguration: flings slower than this (units a second) don't happen, and faster ones are capped.
+    private static inline var MIN_FLING_VELOCITY:Float = 50;
+    private static inline var MAX_FLING_VELOCITY:Float = 8000;
+
     @:access(haxe.ui.core.Component)
     private function onMouseDown(event:MouseEvent) {
+        // A press stops a fling where it is.
+        _flinging = false;
         var hscroll:HorizontalScroll = _scrollview.findComponent(HorizontalScroll, false);
         var vscroll:VerticalScroll = _scrollview.findComponent(VerticalScroll, false);
 
@@ -977,27 +1014,10 @@ class ScrollViewEvents extends haxe.ui.events.Events {
             _offset.y = vscroll.pos + event.screenY;
         }
 
-        if (_scrollview.scrollMode == ScrollMode.INERTIAL) {
-            if (_inertia == null) {
-                _inertia = {
-                    screen: new Point(),
-                    target: new Point(),
-                    amplitude: new Point(),
-                    direction: new Point(),
-                    timestamp: 0
-                }
-            }
-
-            _inertia.target.x = _scrollview.hscrollPos;
-            _inertia.target.y = _scrollview.vscrollPos;
-            _inertia.amplitude.x = 0;
-            _inertia.amplitude.y = 0;
-
-            _inertia.screen.x = event.screenX;
-            _inertia.screen.y = event.screenY;
-
-            _inertia.timestamp = haxe.Timer.stamp();
-        }
+        _sampleTimes.resize(0);
+        _sampleX.resize(0);
+        _sampleY.resize(0);
+        addSample(hscroll, vscroll);
 
         Screen.instance.registerEvent(MouseEvent.MOUSE_MOVE, onMouseMove);
         Screen.instance.registerEvent(MouseEvent.MIDDLE_MOUSE_UP, onMouseUp);
@@ -1038,6 +1058,60 @@ class ScrollViewEvents extends haxe.ui.events.Events {
             #end
         }
         _lastMousePos = new Point(event.screenX, event.screenY);
+        addSample(hscroll, vscroll);
+    }
+
+    private function addSample(hscroll:HorizontalScroll, vscroll:VerticalScroll) {
+        if (_sampleTimes.length == SAMPLES) {
+            _sampleTimes.shift();
+            _sampleX.shift();
+            _sampleY.shift();
+        }
+        _sampleTimes.push(haxe.Timer.stamp());
+        _sampleX.push(hscroll != null ? hscroll.pos : 0);
+        _sampleY.push(vscroll != null ? vscroll.pos : 0);
+    }
+
+    /**
+        The drag's velocity as it let go, along x or y, in units a second, as Android's velocity tracker has it by
+        default (LSQ2): a quadratic fitted by least squares to the positions in the 100 ms up to the last move, and its
+        slope at that move, so a flick's speeding up at the end counts in full; 0 when it held still for the last 40 ms.
+    **/
+    private function releaseVelocity(positions:Array<Float>, now:Float):Float {
+        var last = _sampleTimes.length - 1;
+        if (last < 1 || now - _sampleTimes[last] > 0.04) {
+            return 0;
+        }
+        var first = last;
+        while (first > 0 && _sampleTimes[last] - _sampleTimes[first - 1] <= 0.1) {
+            first--;
+        }
+        if (_sampleTimes[last] - _sampleTimes[first] < 0.001) {
+            return 0;
+        }
+        // Times and positions from the last move's: x = a + b t + c t², and the velocity there is b.
+        var s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0, s4 = 0.0, sx = 0.0, stx = 0.0, st2x = 0.0;
+        for (i in first...last + 1) {
+            var t = _sampleTimes[i] - _sampleTimes[last];
+            var x = positions[i] - positions[last];
+            s0 += 1;
+            s1 += t;
+            s2 += t * t;
+            s3 += t * t * t;
+            s4 += t * t * t * t;
+            sx += x;
+            stx += t * x;
+            st2x += t * t * x;
+        }
+        var velocity:Float;
+        var det = s0 * (s2 * s4 - s3 * s3) - s1 * (s1 * s4 - s2 * s3) + s2 * (s1 * s3 - s2 * s2);
+        if (last - first >= 2 && Math.abs(det) > 1e-18) {
+            velocity = (s0 * (stx * s4 - s3 * st2x) - sx * (s1 * s4 - s2 * s3) + s2 * (s1 * st2x - s2 * stx)) / det;
+        } else {
+            // Too few moves for a curve: a straight line through them.
+            velocity = (s0 * stx - s1 * sx) / (s0 * s2 - s1 * s1);
+        }
+        return Math.max(-MAX_FLING_VELOCITY, Math.min(MAX_FLING_VELOCITY, velocity));
     }
 
     private var _containerEventsPaused:Bool = false;
@@ -1105,132 +1179,61 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         Screen.instance.unregisterEvent(MouseEvent.MIDDLE_MOUSE_UP, onMouseUp);
         Screen.instance.unregisterEvent(MouseEvent.RIGHT_MOUSE_UP, onMouseUp);
         Screen.instance.unregisterEvent(MouseEvent.MOUSE_UP, onMouseUp);
+        _scrollview.removeClass(":down");
 
-        if (_scrollview.scrollMode == ScrollMode.INERTIAL) {
+        // A touch drag flings, as on a phone; with the inertial mode any drag does.
+        var mode = _scrollview.scrollMode;
+        if (mode == ScrollMode.INERTIAL || (mode == ScrollMode.DEFAULT && event.touchEvent)) {
             var now = haxe.Timer.stamp();
-            var elapsed = (now - _inertia.timestamp) * 1000;
-
-            var deltaX = Math.abs(_inertia.screen.x - event.screenX);
-            var deltaY = Math.abs(_inertia.screen.y - event.screenY);
-
-            _inertia.direction.x = (_inertia.screen.x - event.screenX) < 0 ? 0 : 1;
-            var velocityX = deltaX / elapsed;
-            var v = 1000 * deltaX / (1 + elapsed);
-            velocityX = 0.8 * v + 0.2 * velocityX;
-
-            _inertia.direction.y = (_inertia.screen.y - event.screenY) < 0 ? 0 : 1;
-            var velocityY = deltaY / elapsed;
-            var v = 1000 * deltaY / (1 + elapsed);
-            velocityY = 0.8 * v + 0.2 * velocityY;
-
-            if (velocityX <= 75 && velocityY <= 75) {
-                dispatch(new ScrollEvent(ScrollEvent.STOP));
-                Toolkit.callLater(resumeContainerEvents);
+            _flingHScroll = _scrollview.findComponent(HorizontalScroll, false);
+            _flingVScroll = _scrollview.findComponent(VerticalScroll, false);
+            var vx = _flingHScroll != null ? releaseVelocity(_sampleX, now) : 0;
+            var vy = _flingVScroll != null ? releaseVelocity(_sampleY, now) : 0;
+            _flingX = Math.abs(vx) >= MIN_FLING_VELOCITY ? ScrollView.flingMotion(vx) : null;
+            _flingY = Math.abs(vy) >= MIN_FLING_VELOCITY ? ScrollView.flingMotion(vy) : null;
+            if (_flingX != null || _flingY != null) {
+                // From the drag's last move, its time and place, so the fling carries straight on from it however
+                // late the release, or the fling's first frame, comes.
+                var last = _sampleTimes.length - 1;
+                _flinging = true;
+                _flingStart = _sampleTimes[last];
+                _flingFromX = _sampleX[last];
+                _flingFromY = _sampleY[last];
+                // The release's frame moves on already, as the drag's frames did.
+                flingStep();
                 return;
             }
-
-            _inertia.timestamp = haxe.Timer.stamp();
-
-            var hscroll:HorizontalScroll = _scrollview.findComponent(HorizontalScroll, false);
-            if (hscroll != null) {
-                _inertia.amplitude.x = 0.8 * velocityX;
-            }
-            if (_inertia.direction.x == 0) {
-                _inertia.target.x = Math.round(_scrollview.hscrollPos - _inertia.amplitude.x);
-            } else {
-                _inertia.target.x = Math.round(_scrollview.hscrollPos + _inertia.amplitude.x);
-            }
-
-            var vscroll:VerticalScroll = _scrollview.findComponent(VerticalScroll, false);
-            if (vscroll != null) {
-                _inertia.amplitude.y = 0.8 * velocityY;
-            }
-            if (_inertia.direction.y == 0) {
-                _inertia.target.y = Math.round(_scrollview.vscrollPos - _inertia.amplitude.y);
-            } else {
-                _inertia.target.y = Math.round(_scrollview.vscrollPos + _inertia.amplitude.y);
-            }
-
-            if (_scrollview.hscrollPos == _inertia.target.x && _scrollview.vscrollPos == _inertia.target.y) {
-                dispatch(new ScrollEvent(ScrollEvent.STOP));
-                Toolkit.callLater(resumeContainerEvents);
-                return;
-            }
-
-            if (_scrollview.hscrollPos == _inertia.target.x) {
-                _inertia.amplitude.x = 0;
-            }
-            if (_scrollview.vscrollPos == _inertia.target.y) {
-                _inertia.amplitude.y = 0;
-            }
-
-            Toolkit.callLater(inertialScroll);
-        } else {
-            _scrollview.removeClass(":down");
-            dispatch(new ScrollEvent(ScrollEvent.STOP));
-            Toolkit.callLater(resumeContainerEvents);
         }
+        dispatch(new ScrollEvent(ScrollEvent.STOP));
+        Toolkit.callLater(resumeContainerEvents);
     }
 
-    private function inertialScroll() {
-        var elapsed = (haxe.Timer.stamp() - _inertia.timestamp) * 1000;
-
-        var finishedX = false;
-        if (_inertia.amplitude.x != 0) {
-            var deltaX = -_inertia.amplitude.x * Math.exp(-elapsed / INERTIAL_TIME_CONSTANT);
-            if (deltaX > 0.5 || deltaX < -0.5) {
-                var oldPos = _scrollview.hscrollPos;
-                var newPos:Float = 0;
-                if (_inertia.direction.x == 0) {
-                    newPos = _inertia.target.x - deltaX;
-                } else {
-                    newPos = _inertia.target.x + deltaX;
-                }
-                if (newPos < 0) {
-                    newPos = 0;
-                } else if (newPos > _scrollview.hscrollMax) {
-                    newPos = _scrollview.hscrollMax;
-                }
-                _scrollview.hscrollPos = newPos;
-                finishedX = (newPos == oldPos || newPos == 0 || newPos == _scrollview.hscrollMax);
-            } else {
-                finishedX = true;
-            }
-        } else {
-            finishedX = true;
+    /** Moves a fling on, once a frame, until it stops, reaches an end, or a press stops it. **/
+    private function flingStep() {
+        if (!_flinging) {
+            return;
         }
-
-        var finishedY = false;
-        if (_inertia.amplitude.y != 0) {
-            var deltaY = -_inertia.amplitude.y * Math.exp(-elapsed / INERTIAL_TIME_CONSTANT);
-            if (deltaY > 0.5 || deltaY < -0.5) {
-                var oldPos = _scrollview.vscrollPos;
-                var newPos:Float = 0;
-                if (_inertia.direction.y == 0) {
-                    newPos = _inertia.target.y - deltaY;
-                } else {
-                    newPos = _inertia.target.y + deltaY;
-                }
-                if (newPos < 0) {
-                    newPos = 0;
-                } else if (newPos > _scrollview.vscrollMax) {
-                    newPos = _scrollview.vscrollMax;
-                }
-                _scrollview.vscrollPos = newPos;
-                finishedY = (newPos == oldPos || newPos == 0 || newPos == _scrollview.vscrollMax);
-            } else {
-                finishedY = true;
-            }
-        } else {
-            finishedY = true;
+        var t = haxe.Timer.stamp() - _flingStart;
+        var movingX = _flingX != null && flingAxis(_flingX, _flingFromX, t, _flingHScroll);
+        var movingY = _flingY != null && flingAxis(_flingY, _flingFromY, t, _flingVScroll);
+        // The move shows in this frame, as a drag's does. Run from callLater, the validation it asks for would
+        // otherwise wait for the next frame: a fling drew a frame late, then skipped frames.
+        ValidationManager.instance.process();
+        if (movingX || movingY) {
+            Toolkit.callLater(flingStep);
+            return;
         }
+        _flinging = false;
+        dispatch(new ScrollEvent(ScrollEvent.STOP));
+        Toolkit.callLater(resumeContainerEvents);
+    }
 
-        if (finishedX == true && finishedY == true) {
-            dispatch(new ScrollEvent(ScrollEvent.STOP));
-            Toolkit.callLater(resumeContainerEvents);
-        } else {
-            Toolkit.callLater(inertialScroll);
-        }
+    /** Sets one axis's position `t` seconds into its fling, as a drag does, and says whether it moves on. **/
+    private function flingAxis(motion:FlingMotion, from:Float, t:Float, scroll:Scroll):Bool {
+        var pos = from + motion.position(t);
+        var atEnd = pos <= scroll.min || pos >= scroll.max;
+        scroll.pos = Math.max(scroll.min, Math.min(scroll.max, pos));
+        return t < motion.duration && !atEnd;
     }
 
     private var _fadeTimer:Timer = null;
