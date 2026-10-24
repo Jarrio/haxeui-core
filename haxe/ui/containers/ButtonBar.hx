@@ -45,7 +45,7 @@ private class SelectedIndex extends DataBehaviour {
         }
 
         var buttons = _component.findComponents(Button, 1);
-        var button = buttons[_value.toInt()];
+        var button = buttons[_value == null || _value.isNull ? 0 : _value.toInt()];
         if (currentButton == button) {
             return;
         }
@@ -142,6 +142,7 @@ private class Events extends haxe.ui.events.Events {
 //***********************************************************************************************************
 @:dox(hide) @:noCompletion
 @:access(haxe.ui.core.Component)
+@:access(haxe.ui.behaviours.DataBehaviour)
 class ButtonBarBuilder extends CompositeBuilder {
     private var _bar:ButtonBar;
     private var _currentButton:Button;
@@ -163,10 +164,11 @@ class ButtonBarBuilder extends CompositeBuilder {
             child.registerEvent(UIEvent.HIDDEN, onButtonHidden);
         }
         if ((child is Button)) {
-            if (_bar.selectedIndex == _bar.numComponents) {
-                cast(child, Button).selected = true;
-            }
             cast(child, Button).toggle = _bar.toggle;
+            // The bar selects its button by selectedIndex as it validates, once its buttons are in, so a selectedIndex
+            // set after them counts. Selecting here compared the index with numComponents, which counts the dividers,
+            // and the button's change then reset an index set in code after the buttons to that button's.
+            cast(_bar.behaviours.find("selectedIndex"), SelectedIndex).invalidateData();
         }
         
         return null;
