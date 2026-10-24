@@ -146,7 +146,12 @@ private class EnsureVisible extends DefaultBehaviour {
             vscrollPos = vscroll.pos;
         }
         
-        var componentScreenRect = new Rectangle(c.screenLeft, c.screenTop, c.width, c.height);
+        // Up and down, the component counts as in view only with its containers' padding, as it's scrolled to show
+        // it with that padding: tested without it, a component the view kept shrinking over (as the on-screen
+        // keyboard slides up) stayed put until it was cut off, then jumped by the padding and more.
+        var topOffset = calcOffset(c, "top");
+        var bottomOffset = calcOffset(c, "bottom");
+        var componentScreenRect = new Rectangle(c.screenLeft, c.screenTop - topOffset, c.width, c.height + topOffset + bottomOffset);
         var componentRect = new Rectangle(c.screenLeft + hscrollPos, c.screenTop + vscrollPos, c.width, c.height);
         var scrollRect = new Rectangle(scrollview.screenLeft, scrollview.screenTop, scrollview.width, scrollview.height);
         
@@ -169,16 +174,16 @@ private class EnsureVisible extends DefaultBehaviour {
         var offsetLeft = 1;// contentsRect.left - scrollRect.left;
         var offsetTop = 1;// contentsRect.top - scrollRect.top;
         
-        if (scrollRectFixed.containsPoint(componentScreenRect.right, componentScreenRect.top) == false) {
+        if (scrollRectFixed.containsPoint(componentScreenRect.right, c.screenTop) == false) {
             newHScrollPos = fixedRight - (usableSize.width) + (calcOffset(c, "right") - offsetLeft);
-        } else if (scrollRectFixed.containsPoint(componentScreenRect.left, componentScreenRect.top) == false) {
+        } else if (scrollRectFixed.containsPoint(componentScreenRect.left, c.screenTop) == false) {
             newHScrollPos = fixedLeft - (calcOffset(c, "left") + offsetLeft);
         }
         
         if (scrollRectFixed.containsPoint(componentScreenRect.left, componentScreenRect.bottom) == false) {
-            newVScrollPos = fixedBottom - (usableSize.height) + (calcOffset(c, "bottom") - offsetTop);
+            newVScrollPos = fixedBottom - (usableSize.height) + (bottomOffset - offsetTop);
         } else if (scrollRectFixed.containsPoint(componentScreenRect.left, componentScreenRect.top) == false) {
-            newVScrollPos = fixedTop - (calcOffset(c, "top") + offsetTop);
+            newVScrollPos = fixedTop - (topOffset + offsetTop);
         }
         
         if (hscroll != null) {
