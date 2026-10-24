@@ -13,6 +13,7 @@ import haxe.ui.constants.Priority;
 import haxe.ui.constants.ScrollMode;
 import haxe.ui.constants.ScrollPolicy;
 import haxe.ui.core.Component;
+import haxe.ui.core.Platform;
 import haxe.ui.core.CompositeBuilder;
 import haxe.ui.core.IScroller;
 import haxe.ui.core.InteractiveComponent;
@@ -1072,7 +1073,7 @@ class ScrollViewEvents extends haxe.ui.events.Events {
             _sampleX.shift();
             _sampleY.shift();
         }
-        _sampleTimes.push(haxe.Timer.stamp());
+        _sampleTimes.push(frameSeconds());
         _sampleX.push(hscroll != null ? hscroll.pos : 0);
         _sampleY.push(vscroll != null ? vscroll.pos : 0);
     }
@@ -1189,7 +1190,7 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         // A touch drag flings, as on a phone; with the inertial mode any drag does.
         var mode = _scrollview.scrollMode;
         if (mode == ScrollMode.INERTIAL || (mode == ScrollMode.DEFAULT && event.touchEvent)) {
-            var now = haxe.Timer.stamp();
+            var now = frameSeconds();
             _flingHScroll = _scrollview.findComponent(HorizontalScroll, false);
             _flingVScroll = _scrollview.findComponent(VerticalScroll, false);
             var vx = _flingHScroll != null ? releaseVelocity(_sampleX, now) : 0;
@@ -1213,12 +1214,17 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         Toolkit.callLater(resumeContainerEvents);
     }
 
+    /** The frame's time, in seconds: drag samples and flings are timed by the frames that show them. **/
+    private static inline function frameSeconds():Float {
+        return Platform.instance.frameTime() / 1000;
+    }
+
     /** Moves a fling on, once a frame, until it stops, reaches an end, or a press stops it. **/
     private function flingStep() {
         if (!_flinging) {
             return;
         }
-        var t = haxe.Timer.stamp() - _flingStart;
+        var t = frameSeconds() - _flingStart;
         var movingX = _flingX != null && flingAxis(_flingX, _flingFromX, t, _flingHScroll);
         var movingY = _flingY != null && flingAxis(_flingY, _flingFromY, t, _flingVScroll);
         // The move shows in this frame, as a drag's does. Run from callLater, the validation it asks for would

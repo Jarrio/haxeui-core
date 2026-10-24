@@ -86,6 +86,15 @@ class PlatformBase {
     public function perf():Float {
         return haxe.Timer.stamp() * 1000;
     }
+
+    /**
+        The time, in ms, of the frame being drawn: what motion that follows time (a fling) should show in it. A backend
+        whose frames run on a clock of their own, such as one that draws a frame ahead of the display, returns that
+        clock; by default it's `perf()`.
+    **/
+    public function frameTime():Float {
+        return perf();
+    }
     
     // shortcuts for key code lookups
     public var KeyTab(get, null):Int;
