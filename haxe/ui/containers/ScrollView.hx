@@ -15,6 +15,7 @@ import haxe.ui.constants.ScrollPolicy;
 import haxe.ui.core.Component;
 import haxe.ui.core.Platform;
 import haxe.ui.core.CompositeBuilder;
+import haxe.ui.core.IAxisDrag;
 import haxe.ui.core.IScroller;
 import haxe.ui.core.InteractiveComponent;
 import haxe.ui.core.Screen;
@@ -79,6 +80,13 @@ class ScrollView extends InteractiveComponent implements IScroller {
         theme can set it (Android's stretch, iOS's bounce). Null, the default, keeps the view at its ends.
     **/
     public static var overscroll:OverscrollEffect = null;
+
+    /**
+        How far a touch drag that starts on a component taking drags along one axis (`IAxisDrag`, such as a slider)
+        moves before the scroll view decides whose it is: along that axis it's the component's, across it the scroll
+        view's. Android's touch slop, 8.
+    **/
+    public static var dragSlop:Float = 8;
 
     static function exponentialFling(velocity:Float):FlingMotion {
         var tau = 0.325;
@@ -981,6 +989,12 @@ class ScrollViewEvents extends haxe.ui.events.Events {
     
     private var _offset:Point;
 
+    // A touch drag that started on a component taking drags along one axis, until it moves far enough to tell whose
+    // it is, and where it started.
+    private var _axisDrag:IAxisDrag = null;
+    private var _downX:Float = 0;
+    private var _downY:Float = 0;
+
     // The drag's last positions, to take its velocity from as it lets go: times in seconds, scroll positions.
     private static inline var SAMPLES:Int = 20;
     private var _sampleTimes:Array<Float> = [];
@@ -1020,7 +1034,19 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         // we want to disallow mouse scrolling if we are under a textfield/textarea as this stops selection of data in textfield
         // if we are under a scrollbar, lets let the scroll bar handle it (rather than scrollview intefering) 
         var under = _scrollview.findComponentsUnderPoint(event.screenX - componentOffset.x, event.screenY - componentOffset.y);
+        _axisDrag = null;
         for (c in under) {
+            // a component that drags along an axis (a slider) has a mouse drag to itself, and shares a touch drag by
+            // its direction (see decideAxisDrag)
+            if ((c is IAxisDrag) && !c.disabled) {
+                var axis:IAxisDrag = cast c;
+                if (axis.dragsAlong(true) || axis.dragsAlong(false)) {
+                    if (!event.touchEvent) {
+                        return;
+                    }
+                    _axisDrag = axis;
+                }
+            }
             // a press on a text input is its own, to select in it; with touch a single line lets the page scroll,
             // as on a phone, and selects with a long press instead
             if (c.hasTextInput() && (!event.touchEvent || c.getTextInput().multiline)) {
@@ -1037,6 +1063,8 @@ class ScrollViewEvents extends haxe.ui.events.Events {
 
         //event.cancel();
 
+        _downX = event.screenX;
+        _downY = event.screenY;
         _offset = new Point();
         if (hscroll != null) {
             _offset.x = hscroll.pos + caughtOverscroll(false, event) + event.screenX;
@@ -1097,6 +1125,9 @@ class ScrollViewEvents extends haxe.ui.events.Events {
     private var _movementThreshold:Int = 3;
     private var _lastMousePos:Point = null;
     private function onMouseMove(event:MouseEvent) {
+        if (_axisDrag != null && !decideAxisDrag(event)) {
+            return;
+        }
         event.cancel();
         var hscroll:HorizontalScroll = _scrollview.findComponent(HorizontalScroll, false);
         if (hscroll != null) {
@@ -1128,6 +1159,42 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         }
         _lastMousePos = new Point(event.screenX, event.screenY);
         addSample(hscroll, vscroll);
+    }
+
+    /**
+        A touch drag that started on a component taking drags along one axis: once it has moved `dragSlop`, along that
+        axis it's the component's and the scroll view lets go; across it, the scroll view takes it from here, without
+        a jump. Returns whether the scroll view moves with it.
+    **/
+    private function decideAxisDrag(event:MouseEvent):Bool {
+        var dx = Math.abs(event.screenX - _downX);
+        var dy = Math.abs(event.screenY - _downY);
+        if (Math.max(dx, dy) <= ScrollView.dragSlop) {
+            return false;
+        }
+        var axis = _axisDrag;
+        _axisDrag = null;
+        if (axis.dragsAlong(dx > dy)) {
+            Screen.instance.unregisterEvent(MouseEvent.MOUSE_MOVE, onMouseMove);
+            Screen.instance.unregisterEvent(MouseEvent.MIDDLE_MOUSE_UP, onMouseUp);
+            Screen.instance.unregisterEvent(MouseEvent.RIGHT_MOUSE_UP, onMouseUp);
+            Screen.instance.unregisterEvent(MouseEvent.MOUSE_UP, onMouseUp);
+            _scrollview.removeClass(":down");
+            return false;
+        }
+        var hscroll:HorizontalScroll = _scrollview.findComponent(HorizontalScroll, false);
+        var vscroll:VerticalScroll = _scrollview.findComponent(VerticalScroll, false);
+        if (hscroll != null) {
+            _offset.x = hscroll.pos + _overscrollX + event.screenX;
+        }
+        if (vscroll != null) {
+            _offset.y = vscroll.pos + _overscrollY + event.screenY;
+        }
+        _lastMousePos = new Point(event.screenX, event.screenY);
+        _sampleTimes.resize(0);
+        _sampleX.resize(0);
+        _sampleY.resize(0);
+        return true;
     }
 
     private function addSample(hscroll:HorizontalScroll, vscroll:VerticalScroll) {
