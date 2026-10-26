@@ -15,6 +15,11 @@ class MouseEvent extends UIEvent {
     public static final MIDDLE_CLICK:EventType<MouseEvent> = EventType.name("middleclick");
     public static final MIDDLE_MOUSE_DOWN:EventType<MouseEvent> = EventType.name("middlemousedown");
     public static final MIDDLE_MOUSE_UP:EventType<MouseEvent> = EventType.name("middlemouseup");
+    /**
+        A touch held still on the component (a long press), where the backend sends one. The component listening takes
+        the press: no click follows, and a scroll view under it lets go.
+    **/
+    public static final LONG_PRESS:EventType<MouseEvent> = EventType.name("longpress");
 
     public var screenX:Float;
     public var screenY:Float;
