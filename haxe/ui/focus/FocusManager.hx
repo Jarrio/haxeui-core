@@ -55,10 +55,7 @@ class FocusManager extends FocusManagerImpl {
     
     public function pushView(view:Component) {
         if (hasFocusableItem(view)) {
-            for (k in _lastFocuses.keys()) {
-                _lastFocuses.get(k).focus = false;
-                unapplyFocus(cast _lastFocuses.get(k));
-            }
+            unfocusRemembered();
         }
         if (autoFocus == true) {
             focusOnFirstInteractive(view);
@@ -69,14 +66,23 @@ class FocusManager extends FocusManagerImpl {
     private function onViewReady(e:UIEvent) {
         e.target.unregisterEvent(UIEvent.READY, onViewReady);
         if (hasFocusableItem(e.target)) {
-            for (k in _lastFocuses.keys()) {
-                _lastFocuses.get(k).focus = false;
-                unapplyFocus(cast _lastFocuses.get(k));
-            }
+            unfocusRemembered();
             focusOnFirstInteractive(e.target);
         }
     }
     
+    /**
+        Unfocuses each view's remembered focus, which stays remembered to give back when the view above it closes.
+        From a copy: unfocusing a component clears the top view's focus, which forgets the top view's.
+    **/
+    private function unfocusRemembered() {
+        var remembered = [for (f in _lastFocuses) f];
+        for (f in remembered) {
+            f.focus = false;
+            unapplyFocus(cast f);
+        }
+    }
+
     private function hasFocusableItem(view:Component):Bool {
         var list = [];
         buildFocusableList(view, list);
@@ -123,9 +129,11 @@ class FocusManager extends FocusManagerImpl {
                 unapplyFocus(cast currentFocus);
                 currentFocus.focus = false;
             }
-            if (_lastFocuses.exists(root) && _lastFocuses.get(root) != value) {
-                _lastFocuses.get(root).focus = false;
-                unapplyFocus(cast _lastFocuses.get(root));
+            // Held here: unfocusing it clears the top view's focus, which forgets it.
+            var last = _lastFocuses.get(root);
+            if (last != null && last != value) {
+                last.focus = false;
+                unapplyFocus(cast last);
             }
 
             _lastFocuses.set(root, value);
@@ -135,9 +143,14 @@ class FocusManager extends FocusManagerImpl {
             if (top == null) {
                 return null;
             }
-            if (_lastFocuses.exists(top)) {
-                _lastFocuses.get(top).focus = false;
-                unapplyFocus(cast _lastFocuses.get(top));
+            var last = _lastFocuses.get(top);
+            if (last != null) {
+                // Nothing has focus now, so there's nothing to give back when a view above this one closes: a text
+                // field put away with the on-screen keyboard came back, keyboard and all, after a menu closed.
+                // Forgotten first, as unfocusing it comes back here.
+                _lastFocuses.remove(top);
+                last.focus = false;
+                unapplyFocus(cast last);
             }
         }
         return value;
