@@ -150,6 +150,11 @@ private class EnsureVisible extends DefaultBehaviour {
             return null;
         }
 
+        // Not laid out yet (focus given as a screen is added): no layout to measure by, which crashed on hxcpp.
+        if (scrollview.layout == null) {
+            return null;
+        }
+
         var hscroll:HorizontalScroll = scrollview.findComponent(HorizontalScroll, false);
         var hscrollPos:Float = 0;
         if (hscroll != null) {
