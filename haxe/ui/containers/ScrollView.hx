@@ -1066,6 +1066,22 @@ class ScrollViewEvents extends haxe.ui.events.Events {
             }
         }
 
+        // a touch drag inside something that takes drags along one axis (a pager of pages that scroll up and down) is
+        // shared the same way, along an axis this view doesn't scroll itself (see decideAxisDrag)
+        if (_axisDrag == null && event.touchEvent) {
+            var outer = _scrollview.parentComponent;
+            while (outer != null) {
+                if ((outer is IAxisDrag) && !outer.disabled) {
+                    var axis:IAxisDrag = cast outer;
+                    if ((axis.dragsAlong(true) && hscroll == null) || (axis.dragsAlong(false) && vscroll == null)) {
+                        _axisDrag = axis;
+                    }
+                    break;
+                }
+                outer = outer.parentComponent;
+            }
+        }
+
         //event.cancel();
 
         _downX = event.screenX;
