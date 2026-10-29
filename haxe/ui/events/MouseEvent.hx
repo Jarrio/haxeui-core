@@ -25,6 +25,8 @@ class MouseEvent extends UIEvent {
     public var screenY:Float;
     public var buttonDown:Bool;
     public var delta:Float;
+    /** A sideways wheel or touchpad scroll, as `delta` is up and down: positive to the right. **/
+    public var deltaX:Float = 0;
     public var touchEvent:Bool;
     public var ctrlKey:Bool;
     public var shiftKey:Bool;
@@ -60,6 +62,7 @@ class MouseEvent extends UIEvent {
         c.screenY = this.screenY;
         c.buttonDown = this.buttonDown;
         c.delta = this.delta;
+        c.deltaX = this.deltaX;
         c.touchEvent = this.touchEvent;
         c.ctrlKey = this.ctrlKey;
         c.shiftKey = this.shiftKey;
