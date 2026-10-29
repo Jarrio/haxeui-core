@@ -83,6 +83,13 @@ class ScrollView extends InteractiveComponent implements IScroller {
     public static var overscroll:OverscrollEffect = null;
 
     /**
+        Makes a scroll view's bars, which differ between themes, so a theme can give its own: a `VerticalScroll` or
+        `HorizontalScroll` subclass that draws and behaves as it likes. Null, the default, makes HaxeUI's.
+    **/
+    public static var verticalScrollFactory:Void->VerticalScroll = null;
+    public static var horizontalScrollFactory:Void->HorizontalScroll = null;
+
+    /**
         How far a touch drag that starts on a component taking drags along one axis (`IAxisDrag`, such as a slider)
         moves before the scroll view decides whose it is: along that axis it's the component's, across it the scroll
         view's. Android's touch slop, 8.
@@ -1855,7 +1862,7 @@ class ScrollViewBuilder extends CompositeBuilder {
         }
 
         if (vcw > usableSize.width && hscroll == null || _scrollview.horizontalScrollPolicy == ScrollPolicy.ALWAYS) {
-            hscroll = new HorizontalScroll();
+            hscroll = ScrollView.horizontalScrollFactory != null ? ScrollView.horizontalScrollFactory() : new HorizontalScroll();
             hscroll.includeInLayout = !_scrollview.autoHideScrolls;
             hscroll.hidden = _scrollview.autoHideScrolls;
             hscroll.percentWidth = 100;
@@ -1895,7 +1902,7 @@ class ScrollViewBuilder extends CompositeBuilder {
         }
 
         if ((vch > usableSize.height && vscroll == null) || _scrollview.verticalScrollPolicy == ScrollPolicy.ALWAYS) {
-            vscroll = new VerticalScroll();
+            vscroll = ScrollView.verticalScrollFactory != null ? ScrollView.verticalScrollFactory() : new VerticalScroll();
             vscroll.includeInLayout = !_scrollview.autoHideScrolls;
             vscroll.hidden = _scrollview.autoHideScrolls;
             vscroll.percentHeight = 100;
