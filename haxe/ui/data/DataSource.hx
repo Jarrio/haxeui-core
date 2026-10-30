@@ -191,7 +191,13 @@ class DataSource<T> {
     }
     
     public function sort(field:String = null, direction:SortDirection = null) {
-        sortCustom(sortByFn.bind(_, _, _, field), direction);
+        // Each value's letters and number are worked out once per sort rather than in every comparison, which ran two
+        // regular expressions on both values each time; the order comes out the same.
+        var keys = new Map<String, SortKey>();
+        sortCustom(function(o1:T, o2:T, direction:SortDirection) {
+            return sortByKeys(o1, o2, direction, field, keys);
+        }, direction);
+        keys.clear();
     }
     
     private static var regexAlpha = new EReg("[^a-zA-Z]", "g");
@@ -234,6 +240,49 @@ class DataSource<T> {
         return alpha1 > alpha2 ? high : low;
     }
     
+    private function sortByKeys(o1:T, o2:T, direction:SortDirection, field:String, keys:Map<String, SortKey>):Int {
+        var f1:Dynamic = o1;
+        var f2:Dynamic = o2;
+
+        if (field != null) {
+            f1 = Reflect.field(o1, field);
+            f2 = Reflect.field(o2, field);
+        }
+
+        if (f1 == null || f2 == null) {
+            return 0;
+        }
+
+        var k1 = sortKey(Std.string(f1), keys);
+        var k2 = sortKey(Std.string(f2), keys);
+
+        if (direction == null) {
+            direction = SortDirection.ASCENDING;
+        }
+
+        var high = 1;
+        var low = -1;
+        if (direction == SortDirection.DESCENDING) {
+            high = -1;
+            low = 1;
+        }
+
+        if (k1.alpha == k2.alpha) {
+            return k1.numeric == k2.numeric ? 0 : k1.numeric > k2.numeric ? high : low;
+        }
+
+        return k1.alpha > k2.alpha ? high : low;
+    }
+
+    private static function sortKey(value:String, keys:Map<String, SortKey>):SortKey {
+        var key = keys.get(value);
+        if (key == null) {
+            key = {alpha: regexAlpha.replace(value, ""), numeric: Std.parseInt(regexNumeric.replace(value, ""))};
+            keys.set(value, key);
+        }
+        return key;
+    }
+
     // overrides
     private function handleGetSize():Int {
         return 0;
@@ -307,3 +356,6 @@ class DataSource<T> {
         return null;
     }
 }
+
+/** A value's letters and its digits as a number, which `sort` compares. **/
+private typedef SortKey = {alpha:String, numeric:Null<Int>};
