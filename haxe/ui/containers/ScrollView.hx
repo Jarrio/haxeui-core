@@ -36,7 +36,7 @@ import haxe.ui.validation.InvalidationFlags;
 import haxe.ui.validation.ValidationManager;
 
 @:composite(ScrollViewEvents, ScrollViewBuilder, ScrollViewLayout)
-class ScrollView extends InteractiveComponent implements IScroller {
+class ScrollView extends InteractiveComponent implements IScroller implements INestedScroll {
     //***********************************************************************************************************
     // Public API
     //***********************************************************************************************************
@@ -88,6 +88,40 @@ class ScrollView extends InteractiveComponent implements IScroller {
     **/
     public static var verticalScrollFactory:Void->VerticalScroll = null;
     public static var horizontalScrollFactory:Void->HorizontalScroll = null;
+
+    // A scroll view inside this one shares its touch scrolling (INestedScroll): what it can't scroll at an end, a
+    // drag's step or a fling's speed, this one carries on with, as Android's nested scrolling does.
+
+    public function nestedScrollStart(vertical:Bool) {
+        var builder = scrollEvents();
+        if (builder != null) {
+            builder.nestedStart();
+        }
+    }
+
+    public function nestedPreScroll(vertical:Bool, delta:Float):Float {
+        return 0;
+    }
+
+    public function nestedPostScroll(vertical:Bool, delta:Float):Float {
+        var builder = scrollEvents();
+        return builder != null ? builder.nestedScroll(vertical, delta) : 0;
+    }
+
+    public function nestedFling(vertical:Bool, velocity:Float):Bool {
+        return false;
+    }
+
+    public function nestedFlingLeft(vertical:Bool, velocity:Float) {
+        var builder = scrollEvents();
+        if (builder != null) {
+            builder.nestedFlingOn(vertical, velocity);
+        }
+    }
+
+    private function scrollEvents():ScrollViewEvents {
+        return Std.downcast(_internalEvents, ScrollViewEvents);
+    }
 
     /**
         How far a touch drag that starts on a component taking drags along one axis (`IAxisDrag`, such as a slider)
@@ -1272,6 +1306,40 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         A shared drag's step of `delta` (positive as the finger moves up): what it sits in takes its part first, the
         view scrolls by the rest within its range, and what's left at an end goes back to what it sits in.
     **/
+    /** A drag began in a scroll view inside this one: this one's fling stops, as a touch on it would. **/
+    public function nestedStart() {
+        _flinging = false;
+    }
+
+    /** What a scroll view inside couldn't scroll at its end: this one scrolls by it, as far as it can. **/
+    public function nestedScroll(vertical:Bool, delta:Float):Float {
+        var scroll:Scroll = vertical ? _scrollview.findComponent(VerticalScroll, false) : _scrollview.findComponent(HorizontalScroll, false);
+        if (scroll == null) {
+            return 0;
+        }
+        var was = scroll.pos;
+        scroll.pos = Math.max(scroll.min, Math.min(scroll.max, was + delta));
+        return scroll.pos - was;
+    }
+
+    /** A fling of a scroll view inside reached its end: this one carries on at the speed left. **/
+    public function nestedFlingOn(vertical:Bool, velocity:Float) {
+        var vscroll:VerticalScroll = _scrollview.findComponent(VerticalScroll, false);
+        if (!vertical || vscroll == null || Math.abs(velocity) < MIN_FLING_VELOCITY) {
+            return;
+        }
+        _flingHScroll = null;
+        _flingVScroll = vscroll;
+        _flingX = null;
+        _flingY = ScrollView.flingMotion(velocity);
+        _flingNested = null;
+        _flinging = true;
+        _flingStart = frameSeconds();
+        _flingFromX = 0;
+        _flingFromY = vscroll.pos;
+        flingStep();
+    }
+
     private function nestedStep(vscroll:VerticalScroll, delta:Float) {
         var rest = delta - _nested.nestedPreScroll(true, delta);
         var wanted = vscroll.pos + rest;
@@ -1477,8 +1545,10 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         var pos = from + motion.position(t);
         var atEnd = pos <= scroll.min || pos >= scroll.max;
         scroll.pos = Math.max(scroll.min, Math.min(scroll.max, pos));
-        // A shared fling that reaches the top hands what's left to what the view sits in: a sheet carries on down.
-        if (atEnd && pos <= scroll.min && t < motion.duration && _flingNested != null && (scroll is VerticalScroll)
+        // A shared fling that reaches the top hands what's left to what the view sits in: a sheet carries on down. A
+        // scroll view it sits in carries on at either end.
+        var handsOn = pos <= scroll.min || (pos >= scroll.max && (_flingNested is ScrollView));
+        if (atEnd && handsOn && t < motion.duration && _flingNested != null && (scroll is VerticalScroll)
             && motion.velocity != null) {
             _flingNested.nestedFlingLeft(true, motion.velocity(t));
             return false;
@@ -1554,6 +1624,10 @@ class ScrollViewEvents extends haxe.ui.events.Events {
               return;
             }
 
+            // At its end already, the wheel goes on to a scroll view around this one, as a browser's does.
+            if ((event.delta < 0 && scroll.pos >= scroll.max) || (event.delta > 0 && scroll.pos <= scroll.min)) {
+                return;
+            }
             if (_scrollview.autoHideScrolls == true && _fadeTimer == null) {
                 scroll.fadeIn();
             }
