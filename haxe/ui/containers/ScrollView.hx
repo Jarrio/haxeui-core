@@ -89,8 +89,8 @@ class ScrollView extends InteractiveComponent implements IScroller implements IN
     public static var verticalScrollFactory:Void->VerticalScroll = null;
     public static var horizontalScrollFactory:Void->HorizontalScroll = null;
 
-    // A scroll view inside this one shares its touch scrolling (INestedScroll): what it can't scroll at an end, a
-    // drag's step or a fling's speed, this one carries on with, as Android's nested scrolling does.
+    // A scroll view inside this one shares its touch scrolling (INestedScroll): a drag's step it can't scroll at an
+    // end, and a fling from that end, this one carries on with. A fling that scrolls it stops at its end.
 
     public function nestedScrollStart(vertical:Bool) {
         var builder = scrollEvents();
@@ -1067,9 +1067,29 @@ class ScrollViewEvents extends haxe.ui.events.Events {
     private static inline var MIN_FLING_VELOCITY:Float = 50;
     private static inline var MAX_FLING_VELOCITY:Float = 8000;
 
+    // A press that caught a fling: the fling's motion along each axis and when it started, and when the press came (-1
+    // for none). A drag past the slop the fling's way within FLYWHEEL_TIME of the press is a flick that carries the
+    // fling on (`_caughtFlick`): as it lets go, the speed the fling would have by then is added to its own, so a flick
+    // never stops it, however lightly it ends, and flick after flick goes faster, as Android's list views do. A press
+    // that stays put that long stops it, as does a flick back.
+    private var _caughtX:FlingMotion = null;
+    private var _caughtY:FlingMotion = null;
+    private var _caughtStart:Float = 0;
+    private var _caughtAt:Float = -1;
+    private var _caughtFlick:Bool = false;
+    private static inline var FLYWHEEL_TIME:Float = 0.1;
+
     @:access(haxe.ui.core.Component)
     private function onMouseDown(event:MouseEvent) {
-        // A press stops a fling where it is.
+        // A press stops a fling where it is, keeping its speed for a flick that follows.
+        _caughtAt = -1;
+        _caughtFlick = false;
+        if (_flinging) {
+            _caughtX = _flingX;
+            _caughtY = _flingY;
+            _caughtStart = _flingStart;
+            _caughtAt = frameSeconds();
+        }
         _flinging = false;
         var hscroll:HorizontalScroll = _scrollview.findComponent(HorizontalScroll, false);
         var vscroll:VerticalScroll = _scrollview.findComponent(VerticalScroll, false);
@@ -1211,6 +1231,9 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         if (_axisDrag != null && !decideAxisDrag(event)) {
             return;
         }
+        if (_caughtAt >= 0 && !_caughtFlick) {
+            caughtMove(event);
+        }
         event.cancel();
         var hscroll:HorizontalScroll = _scrollview.findComponent(HorizontalScroll, false);
         if (hscroll != null) {
@@ -1322,7 +1345,7 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         return scroll.pos - was;
     }
 
-    /** A fling of a scroll view inside reached its end: this one carries on at the speed left. **/
+    /** A fling of a scroll view inside that can't move it, from the end it heads for: this one flings instead. **/
     public function nestedFlingOn(vertical:Bool, velocity:Float) {
         var vscroll:VerticalScroll = _scrollview.findComponent(VerticalScroll, false);
         if (!vertical || vscroll == null || Math.abs(velocity) < MIN_FLING_VELOCITY) {
@@ -1413,6 +1436,10 @@ class ScrollViewEvents extends haxe.ui.events.Events {
     @:access(haxe.ui.core.Component)
     private function onContainerEventsStatusChanged() {
         var scrollViewContents = _scrollview.findComponent("scrollview-contents", Component, true, "css");
+        // The deferred resume after a drag or fling can run once the scroll view's page has closed: nothing to resume.
+        if (scrollViewContents == null) {
+            return;
+        }
         scrollViewContents.pauseInteractivity(_containerEventsPaused);
 
         if (_containerEventsPaused == true) {
@@ -1470,6 +1497,12 @@ class ScrollViewEvents extends haxe.ui.events.Events {
             _flingVScroll = _scrollview.findComponent(VerticalScroll, false);
             var vx = _flingHScroll != null ? releaseVelocity(_sampleX, now) : 0;
             var vy = _flingVScroll != null ? releaseVelocity(_nested != null ? _sampleFinger : _sampleY, now) : 0;
+            if (_caughtFlick) {
+                vx = flywheel(vx, speedOf(_caughtX, now - _caughtStart));
+                vy = flywheel(vy, speedOf(_caughtY, now - _caughtStart));
+            }
+            _caughtAt = -1;
+            _caughtFlick = false;
             // What the view sits in may take the fling, settling itself; otherwise it gets what's left at the top.
             _flingNested = _nested;
             if (_nested != null && _nested.nestedFling(true, vy)) {
@@ -1495,6 +1528,39 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         }
         dispatch(new ScrollEvent(ScrollEvent.STOP));
         Toolkit.callLater(resumeContainerEvents);
+    }
+
+    /**
+        A drag from a press that caught a fling: past the slop the fling's way within FLYWHEEL_TIME, it's a flick that
+        carries the fling on; held longer, the press stopped it.
+    **/
+    private function caughtMove(event:MouseEvent) {
+        if (frameSeconds() - _caughtAt > FLYWHEEL_TIME) {
+            _caughtAt = -1;
+            return;
+        }
+        var t = _caughtAt - _caughtStart;
+        var vx = speedOf(_caughtX, t);
+        var vy = speedOf(_caughtY, t);
+        // As scroll distances: positive as the finger moves up or left, the content moving on.
+        var dx = _downX - event.screenX;
+        var dy = _downY - event.screenY;
+        if ((dx * vx > 0 && Math.abs(dx) > ScrollView.dragSlop) || (dy * vy > 0 && Math.abs(dy) > ScrollView.dragSlop)) {
+            _caughtFlick = true;
+        }
+    }
+
+    /** A fling's speed `t` seconds in, 0 with none. **/
+    private static function speedOf(motion:FlingMotion, t:Float):Float {
+        return motion != null && motion.velocity != null ? motion.velocity(t) : 0;
+    }
+
+    /** A flick's `velocity` carrying on a caught fling going at `caught`: the two added, unless it flings back. **/
+    private static function flywheel(velocity:Float, caught:Float):Float {
+        if (caught == 0 || (velocity * caught < 0 && Math.abs(velocity) >= MIN_FLING_VELOCITY)) {
+            return velocity;
+        }
+        return velocity * caught > 0 ? velocity + caught : caught;
     }
 
     /** The frame's time, in seconds: drag samples and flings are timed by the frames that show them. **/
@@ -1525,6 +1591,11 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         if (!_flinging) {
             return;
         }
+        // Its page closed while it coasted: nothing left to move.
+        if (@:privateAccess _scrollview._isDisposed) {
+            _flinging = false;
+            return;
+        }
         var t = frameSeconds() - _flingStart;
         var movingX = _flingX != null && flingAxis(_flingX, _flingFromX, t, _flingHScroll);
         var movingY = _flingY != null && flingAxis(_flingY, _flingFromY, t, _flingVScroll);
@@ -1546,8 +1617,11 @@ class ScrollViewEvents extends haxe.ui.events.Events {
         var atEnd = pos <= scroll.min || pos >= scroll.max;
         scroll.pos = Math.max(scroll.min, Math.min(scroll.max, pos));
         // A shared fling that reaches the top hands what's left to what the view sits in: a sheet carries on down. A
-        // scroll view it sits in carries on at either end.
-        var handsOn = pos <= scroll.min || (pos >= scroll.max && (_flingNested is ScrollView));
+        // scroll view it sits in takes only a fling from the end it heads for, which this view can't move, the drag
+        // having moved that one; a fling that scrolls this view stops at its end, as on its own.
+        var handsOn = (_flingNested is ScrollView)
+            ? (pos <= scroll.min && from <= scroll.min) || (pos >= scroll.max && from >= scroll.max)
+            : pos <= scroll.min;
         if (atEnd && handsOn && t < motion.duration && _flingNested != null && (scroll is VerticalScroll)
             && motion.velocity != null) {
             _flingNested.nestedFlingLeft(true, motion.velocity(t));
@@ -2053,7 +2127,9 @@ class ScrollViewBuilder extends CompositeBuilder {
             clipCY = _contents.componentClipRect.height;
         }
 
-        var newClipRect:Rectangle = new Rectangle(Math.fround(xpos), Math.fround(ypos), Math.fround(clipCX), Math.fround(clipCY));
+        // The scroll position as it is: rounded to whole units here, the contents moved in steps of a whole dp, 2.75
+        // device pixels on a phone, which showed at slow speeds. A backend rounds it to its own pixels.
+        var newClipRect:Rectangle = new Rectangle(xpos, ypos, Math.fround(clipCX), Math.fround(clipCY));
         _contents.componentClipRect = newClipRect;
         _contents.walkComponents(function(c) {
             // we dont usually check see if a component has an event before dispatching it
